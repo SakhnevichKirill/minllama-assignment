@@ -1,5 +1,6 @@
 from typing import Tuple
 import torch
+import numpy as np
 
 def reshape_for_broadcast(freqs_cis: torch.Tensor, x: torch.Tensor):
     """
@@ -7,7 +8,7 @@ def reshape_for_broadcast(freqs_cis: torch.Tensor, x: torch.Tensor):
     for the purpose of broadcasting the frequency tensor during element-wise operations.
 
     Args:
-        freqs_cis (torch.Tensor): Frequency tensor to be reshaped.
+        freqs_cls_cis (torch.Tensor): Frequency tensor to be reshaped.
         x (torch.Tensor): Target tensor for broadcasting compatibility.
 
     Returns:
@@ -58,18 +59,35 @@ def apply_rotary_emb(
     # reshape xq and xk to match the complex representation
     query_real, query_imag = query.float().reshape(query.shape[:-1] + (-1, 2)).unbind(-1)
     key_real, key_imag = key.float().reshape(key.shape[:-1] + (-1, 2)).unbind(-1)
-    # This separates each query/key vector into its odd and even indices (assuming *one-indexing*).
-    # query_real contains q_1, q_3, q_5, ... and query_imag contains q_2, q_4, q_6, ...
 
-    # First, compute the trigonometric values in the second and fourth columns in
-    # slide 22 (linked above).
+    # Precompute cosine and sine frequencies
+    cos_theta, sin_theta = precompute_freqs_cis(head_dim, seqlen, theta, device)
+    
+    # Reshape to make them compatible for broadcast operations
+    cos_theta = reshape_for_broadcast(cos_theta, query_real)
+    sin_theta = reshape_for_broadcast(sin_theta, query_real)
 
-    # Then, combine these trigonometric values with the tensors query_real, query_imag,
-    # key_real, and key_imag.
+    # Apply rotary embeddings (complex multiplications)
+    query_real_out = query_real * cos_theta - query_imag * sin_theta
+    query_imag_out = query_real * sin_theta + query_imag * cos_theta
+    key_real_out = key_real * cos_theta - key_imag * sin_theta
+    key_imag_out = key_real * sin_theta + key_imag * cos_theta
 
-    raise NotImplementedError
+    # Combine the real and imaginary parts back into the original tensor shape
+    query_out = torch.stack([query_real_out, query_imag_out], dim=-1).flatten(3)
+    key_out = torch.stack([key_real_out, key_imag_out], dim=-1).flatten(3)
 
-    query_out = None
-    key_out = None
-    # Return the rotary position embeddings for the query and key tensors
     return query_out, key_out
+
+
+def precompute_freqs_cis(head_dim: int, seqlen: int, theta: float, device: torch.device) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    Precompute the cosine and sine values used for rotary embeddings.
+    """
+    inv_freq = torch.arange(0, head_dim, 2, dtype=torch.float, device=device)
+    inv_freq = theta ** (-inv_freq / head_dim)
+    freqs = torch.outer(torch.arange(seqlen, device=device), inv_freq).float()
+    
+    cos_theta = freqs.cos()
+    sin_theta = freqs.sin()
+    return cos_theta, sin_theta

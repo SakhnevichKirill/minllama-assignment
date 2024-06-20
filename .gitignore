@@ -1,0 +1,4 @@
+__pycache__
+.vscode
+stories42M.pt
+finetune-5-2e-05.pt

@@ -17,3 +17,5 @@ pip install numpy==1.26.3
 pip install tokenizers==0.13.3
 pip install sentencepiece==0.1.99
 wget https://www.cs.cmu.edu/~vijayv/stories42M.pt
+
+pip install chardet-5.2.0
